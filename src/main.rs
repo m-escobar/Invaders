@@ -1,11 +1,17 @@
 use std::error::Error;
-use std::io;
+use std::{io, thread};
+use std::sync::mpsc;
+use std::time::Duration;
 use rusty_audio::Audio;
 
 use crossterm::{ExecutableCommand, terminal};
 use crossterm::cursor::{Hide, Show};
+use crossterm::event;
+use crossterm::event::{Event, KeyCode};
 use crossterm::terminal::{EnterAlternateScreen, LeaveAlternateScreen};
-
+use space_invaders::{frame, render};
+use space_invaders::frame::{Frame, new_frame};
+use space_invaders::render::render;
 
 fn main() -> Result<(), Box<dyn Error>> {
     let mut audio = Audio::new();
@@ -27,7 +33,53 @@ fn main() -> Result<(), Box<dyn Error>> {
     stdout.execute(EnterAlternateScreen)?;
     stdout.execute(Hide)?;
 
+    // Render loop in a separate thread
+    // using mpsc but move to crossbeam channel
+    let (render_tx, render_rx) = mpsc::channel();
+    let render_handle = thread::spawn(move || {
+        let mut last_frame = frame::new_frame();
+        let mut stdout = io::stdout();
+        render::render(&mut stdout, &last_frame, &last_frame, true);
+
+        loop {
+            let curr_frame = match render_rx.recv() {
+                Ok(x) => x,
+                Err(_) => break,
+            };
+
+            render::render(&mut stdout, &last_frame, &last_frame, false);
+            last_frame = curr_frame;
+        }
+    });
+    
+
+    // Game loop
+    'gameloop: loop {
+        // Per frame init
+        let curr_frame = new_frame();
+        
+        // Input
+        while event::poll(Duration::default())? {
+            if let Event::Key(key_event) = event::read()? {
+                match key_event.code {
+                    KeyCode::Esc | KeyCode::Char('q') => {
+                        audio.play("lose");
+                        break 'gameloop;
+                    }
+                    _ => {}
+                }
+            }
+        }
+        
+        //Draw and render
+        let _ = render_tx.send(curr_frame);
+        thread::sleep(Duration::from_millis(1));
+    }
+    
+    
     // Cleanup to exit
+    drop(render_tx);
+    render_handle.join().unwrap();
     audio.wait();
     stdout.execute(Show)?;
     stdout.execute(LeaveAlternateScreen)?;
