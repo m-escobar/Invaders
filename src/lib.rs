@@ -1,10 +1,10 @@
 pub mod frame;
+pub mod player;
 pub mod render;
 
 // pub mod invaders;
 // pub mod level;
 // pub mod menu;
-// pub mod player;
 // pub mod score;
 // pub mod shot;
 
